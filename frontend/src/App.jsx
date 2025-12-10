@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 // Utilidades API (mantiene la lógica de autodetección de entorno)
 const getApiUrl = () => {
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return 'https://stock-api-n1hg.onrender.com/api'
+    return 'https://stock-react-api.onrender.com'
   }
   return 'http://localhost:8000/api'
 }
