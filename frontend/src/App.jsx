@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 // Utilidades API (mantiene la lógica de autodetección de entorno)
 const getApiUrl = () => {
-  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     return 'https://stock-api-n1hg.onrender.com/api'
   }
@@ -83,6 +82,7 @@ function App() {
 
   // Venta
   const [ventaActual, setVentaActual] = useState([])
+  const [confirmingVenta, setConfirmingVenta] = useState(false)
 
   // Modal edición
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -342,10 +342,15 @@ function App() {
   )
 
   const confirmarVenta = async () => {
+    // Evitar doble envío
+    if (confirmingVenta) return
+
     if (ventaActual.length === 0) {
       show('No hay productos en la venta actual', 'warning')
       return
     }
+
+    setConfirmingVenta(true)
     try {
       const productosPayload = ventaActual.map((i) => ({ producto_id: i.id, cantidad: i.cantidad }))
       await api.post('/ventas', { productos: productosPayload })
@@ -358,11 +363,13 @@ function App() {
         })
       )
       setVentaActual([])
-      show('Venta realizada con éxito', 'success')
+      show('Venta realizada con \u00e9xito', 'success')
     } catch (e) {
       console.error(e)
       show(`Error al procesar venta: ${e.message}`, 'error')
       await cargarProductos()
+    } finally {
+      setConfirmingVenta(false)
     }
   }
 
@@ -435,7 +442,9 @@ function App() {
                 </div>
                 <div className="venta-total">
                   <h3>Total: ${totalVenta}</h3>
-                  <button id="confirmarVenta" className="btn-primary" onClick={confirmarVenta}>Confirmar Venta</button>
+                  <button id="confirmarVenta" className="btn-primary" onClick={confirmarVenta} disabled={confirmingVenta} aria-busy={confirmingVenta}>
+                    {confirmingVenta ? 'Procesando...' : 'Confirmar Venta'}
+                  </button>
                 </div>
               </div>
             </div>
