@@ -73,8 +73,8 @@ function App() {
   // Datos principales
   const [categorias, setCategorias] = useState([])
   const [productos, setProductos] = useState([])
-  const [productosFiltrados, setProductosFiltrados] = useState([])
   const [modoBusqueda, setModoBusqueda] = useState(false)
+  const [busquedaProductoId, setBusquedaProductoId] = useState(null)
 
   // Paginación
   const [paginaActual, setPaginaActual] = useState(1)
@@ -87,6 +87,9 @@ function App() {
   // Modal edición
   const [modalAbierto, setModalAbierto] = useState(false)
   const [editProducto, setEditProducto] = useState(null)
+  const [agregandoProducto, setAgregandoProducto] = useState(false)
+  const [guardandoProducto, setGuardandoProducto] = useState(false)
+  const [eliminandoId, setEliminandoId] = useState(null)
 
   // Form refs
   const refCodigoVenta = useRef(null)
@@ -143,13 +146,17 @@ function App() {
     setIsNavOpen(false)
     if (v === 'stock') {
       setModoBusqueda(false)
-      setProductosFiltrados([])
+      setBusquedaProductoId(null)
       setTimeout(() => refBusquedaCodigo.current?.focus(), 100)
     } else if (v === 'agregar') {
       setTimeout(() => refCodigoNuevo.current?.focus(), 100)
     } else if (v === 'ventas') {
       setTimeout(() => refCodigoVenta.current?.focus(), 100)
     }
+  }
+
+  const scrollArriba = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   // Búsqueda por código (stock)
@@ -160,7 +167,7 @@ function App() {
     }
     const encontrado = productos.find((p) => p.codigo === codigo)
     if (encontrado) {
-      setProductosFiltrados([encontrado])
+      setBusquedaProductoId(encontrado.id)
       setModoBusqueda(true)
       setPaginaActual(1)
       show(`Producto encontrado: ${encontrado.nombre}`, 'success')
@@ -171,28 +178,29 @@ function App() {
 
   const limpiarBusqueda = () => {
     setModoBusqueda(false)
-    setProductosFiltrados([])
+    setBusquedaProductoId(null)
     setPaginaActual(1)
   }
 
   // Agregar producto
   const onAgregarProducto = async (e) => {
     e.preventDefault()
+    if (agregandoProducto) return
     const form = e.currentTarget
     const codigo = form.codigo.value.trim()
     const nombre = form.nombre.value.trim()
-    const precio = parseFloat(form.precio.value)
-    const stockInicial = parseInt(form.stock.value)
+    const precio = Number(form.precio.value)
+    const stockInicial = Number(form.stock.value)
 
     if (!codigo || !nombre) {
       show('El código y nombre son obligatorios', 'error')
       return
     }
-    if (precio <= 0) {
+    if (!Number.isFinite(precio) || precio <= 0) {
       show('El precio debe ser mayor a 0', 'error')
       return
     }
-    if (stockInicial < 0) {
+    if (!Number.isFinite(stockInicial) || stockInicial < 0) {
       show('El stock no puede ser negativo', 'error')
       return
     }
@@ -203,11 +211,11 @@ function App() {
       categoria_id: parseInt(form.categoria.value),
       precio,
       detalle: form.detalle.value.trim(),
-      stock_minimo: 0,
-      fecha_vencimiento: form.fechaVencimiento.value || null
+      stock_minimo: 0
     }
 
     try {
+      setAgregandoProducto(true)
       const resp = await api.post('/productos', producto)
       const productoId = resp.id || resp.producto?.id
       if (stockInicial > 0 && productoId) {
@@ -219,6 +227,8 @@ function App() {
     } catch (e) {
       console.error(e)
       show(`Error al agregar producto: ${e.message}`, 'error')
+    } finally {
+      setAgregandoProducto(false)
     }
   }
 
@@ -228,18 +238,17 @@ function App() {
     const nombre = prod ? prod.nombre : 'este producto'
     if (!confirm(`¿Está seguro de que desea eliminar "${nombre}"?\n\nEsta acción no se puede deshacer.`)) return
     try {
+      setEliminandoId(id)
       await api.delete(`/productos/${id}`)
       show(`Producto "${nombre}" eliminado exitosamente`, 'success')
       await cargarProductos()
-      if (modoBusqueda) {
-        const nuevaLista = productosFiltrados.filter((p) => p.id !== id)
-        setProductosFiltrados(nuevaLista)
-        if (nuevaLista.length === 0) limpiarBusqueda()
-      }
+      if (modoBusqueda && busquedaProductoId === id) limpiarBusqueda()
     } catch (e) {
       console.error(e)
       show(`Error al eliminar producto: ${e.message}`, 'error')
       await cargarProductos()
+    } finally {
+      setEliminandoId(null)
     }
   }
 
@@ -254,20 +263,29 @@ function App() {
   const guardarEdicion = async (e) => {
     e.preventDefault()
     if (!editProducto) return
+    if (guardandoProducto) return
     try {
+      setGuardandoProducto(true)
       const id = editProducto.id
       const payload = {
         nombre: editProducto.nombre,
         codigo: editProducto.codigo,
         categoria_id: parseInt(editProducto.categoria_id),
-        precio: parseFloat(editProducto.precio),
+        precio: Number(editProducto.precio),
         detalle: editProducto.detalle,
-        stock_minimo: 0,
-        fecha_vencimiento: editProducto.fecha_vencimiento || null
+        stock_minimo: 0
+      }
+      if (!Number.isFinite(payload.precio) || payload.precio <= 0) {
+        show('Precio inválido', 'error')
+        return
+      }
+      const nuevoStock = Number(editProducto.stock_actual)
+      if (!Number.isFinite(nuevoStock) || nuevoStock < 0) {
+        show('Cantidad en stock inválida', 'error')
+        return
       }
       await api.put(`/productos/${id}`, payload)
       const stockActual = productos.find((p) => p.id === id)?.stock_actual || 0
-      const nuevoStock = parseInt(editProducto.stock_actual)
       const dif = nuevoStock - stockActual
       if (dif > 0) await api.post('/movimientos/entrada', { producto_id: id, cantidad: dif })
       if (dif < 0) await api.post('/movimientos/salida', { producto_id: id, cantidad: Math.abs(dif) })
@@ -279,6 +297,8 @@ function App() {
       console.error(e)
       show(`Error al actualizar producto: ${e.message}`, 'error')
       await cargarProductos()
+    } finally {
+      setGuardandoProducto(false)
     }
   }
 
@@ -374,7 +394,17 @@ function App() {
   }
 
   // Derivados para render
-  const productosAUsar = modoBusqueda ? productosFiltrados : productos
+  const productoBuscado = useMemo(() => {
+    if (!modoBusqueda || busquedaProductoId == null) return null
+    return productos.find((p) => p.id === busquedaProductoId) || null
+  }, [modoBusqueda, busquedaProductoId, productos])
+
+  useEffect(() => {
+    if (!modoBusqueda || busquedaProductoId == null) return
+    if (!productoBuscado) limpiarBusqueda()
+  }, [modoBusqueda, busquedaProductoId, productoBuscado])
+
+  const productosAUsar = modoBusqueda ? (productoBuscado ? [productoBuscado] : []) : productos
   const totalProductos = productosAUsar.length
   const totalPaginas = Math.ceil(totalProductos / productosPorPagina) || 1
   const inicio = (paginaActual - 1) * productosPorPagina
@@ -485,11 +515,9 @@ function App() {
                 <label htmlFor="stock">Cantidad en Stock:</label>
                 <input type="number" id="stock" name="stock" required />
               </div>
-              <div className="form-group">
-                <label htmlFor="fechaVencimiento">Fecha de Vencimiento:</label>
-                <input type="date" id="fechaVencimiento" name="fechaVencimiento" min="1900-01-01" max="9999-12-31" />
-              </div>
-              <button type="submit" className="btn-primary">Agregar Producto</button>
+              <button type="submit" className="btn-primary" disabled={agregandoProducto} aria-busy={agregandoProducto}>
+                {agregandoProducto ? 'Guardando...' : 'Agregar Producto'}
+              </button>
             </form>
           </section>
         )}
@@ -535,7 +563,9 @@ function App() {
                                 <td className={p.stock_actual <= 0 ? 'stock-bajo' : ''}>{p.stock_actual}</td>
                                 <td>
                                   <button className="btn-editar" onClick={() => abrirEditar(p.id)}>Editar</button>
-                                  <button className="btn-eliminar" onClick={() => eliminarProducto(p.id)}>Eliminar</button>
+                                  <button className="btn-eliminar" onClick={() => eliminarProducto(p.id)} disabled={eliminandoId === p.id} aria-busy={eliminandoId === p.id}>
+                                    {eliminandoId === p.id ? 'Eliminando...' : 'Eliminar'}
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -568,7 +598,9 @@ function App() {
                               <td className={p.stock_actual <= 0 ? 'stock-bajo' : ''}>{p.stock_actual}</td>
                               <td>
                                 <button className="btn-editar" onClick={() => abrirEditar(p.id)}>Editar</button>
-                                <button className="btn-eliminar" onClick={() => eliminarProducto(p.id)}>Eliminar</button>
+                                <button className="btn-eliminar" onClick={() => eliminarProducto(p.id)} disabled={eliminandoId === p.id} aria-busy={eliminandoId === p.id}>
+                                  {eliminandoId === p.id ? 'Eliminando...' : 'Eliminar'}
+                                </button>
                               </td>
                             </tr>
                           ))}
@@ -585,11 +617,29 @@ function App() {
                   <span id="pagination-text">Mostrando productos {inicio + 1} a {Math.min(fin, totalProductos)} de {totalProductos}</span>
                 </div>
                 <div className="pagination-buttons">
-                  <button id="btn-anterior" className="btn-pagination" onClick={() => setPaginaActual((p) => Math.max(1, p - 1))}>← Anterior</button>
+                  <button
+                    id="btn-anterior"
+                    className="btn-pagination"
+                    onClick={() => {
+                      setPaginaActual((p) => Math.max(1, p - 1))
+                      scrollArriba()
+                    }}
+                  >
+                    ← Anterior
+                  </button>
                   <div id="pagination-numbers" className="pagination-numbers">
                     {/* Opcionalmente se pueden renderizar números de página */}
                   </div>
-                  <button id="btn-siguiente" className="btn-pagination" onClick={() => setPaginaActual((p) => Math.min(totalPaginas, p + 1))}>Siguiente →</button>
+                  <button
+                    id="btn-siguiente"
+                    className="btn-pagination"
+                    onClick={() => {
+                      setPaginaActual((p) => Math.min(totalPaginas, p + 1))
+                      scrollArriba()
+                    }}
+                  >
+                    Siguiente →
+                  </button>
                 </div>
                 <div className="pagination-summary">
                   <span id="page-indicator">Página {paginaActual} de {totalPaginas}</span>
@@ -634,13 +684,20 @@ function App() {
               </div>
               <div className="form-group">
                 <label htmlFor="editStock">Cantidad en Stock:</label>
-                <input type="number" id="editStock" value={editProducto.stock_actual || 0} onChange={(e) => setEditProducto((p) => ({ ...p, stock_actual: parseInt(e.target.value) }))} required />
+                <input
+                  type="number"
+                  id="editStock"
+                  value={editProducto.stock_actual === '' ? '' : editProducto.stock_actual ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setEditProducto((p) => ({ ...p, stock_actual: value === '' ? '' : parseInt(value) }))
+                  }}
+                  required
+                />
               </div>
-              <div className="form-group">
-                <label htmlFor="editFechaVencimiento">Fecha de Vencimiento:</label>
-                <input type="text" id="editFechaVencimiento" placeholder="DD/MM/YYYY" value={editProducto.fecha_vencimiento || ''} onChange={(e) => setEditProducto((p) => ({ ...p, fecha_vencimiento: e.target.value }))} />
-              </div>
-              <button type="submit" className="btn-primary">Guardar Cambios</button>
+              <button type="submit" className="btn-primary" disabled={guardandoProducto} aria-busy={guardandoProducto}>
+                {guardandoProducto ? 'Guardando...' : 'Guardar Cambios'}
+              </button>
             </form>
           </div>
         </div>
